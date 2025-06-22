@@ -1,8 +1,18 @@
-all:
-	@echo "Write this Makefile by your self."
+default: compile
+TOP ?= top
 
-sim:
-	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
-	@echo "Write this Makefile by your self."
+obj_dir/V$(TOP).mk:
+	verilator -Wall vsrc/$(TOP).v csrc/main.cpp --cc --exe --trace --top-module $(TOP)
 
-include ../Makefile
+compile: obj_dir/V$(TOP).mk
+	make -C obj_dir -f V$(TOP).mk V$(TOP)  
+
+run:compile
+	obj_dir/V$(TOP)
+	
+.PHONY: default compile clean run
+
+clean:
+	rm -rf obj_dir *.vcd
+wave:
+	gtkwave waveform.vcd

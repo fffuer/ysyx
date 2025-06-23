@@ -1,8 +1,8 @@
 default: compile
-TOP ?= top
+TOP ?= mux
 
 obj_dir/V$(TOP).mk:
-	verilator -Wall vsrc/$(TOP).v csrc/main.cpp --cc --exe --trace --top-module $(TOP)
+	verilator -Wall vsrc/$(TOP).v csrc/mux_ver_main.cpp --cc --exe --trace --top-module $(TOP)
 
 compile: obj_dir/V$(TOP).mk
 	make -C obj_dir -f V$(TOP).mk V$(TOP)  

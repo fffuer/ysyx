@@ -24,6 +24,13 @@ const char *regs[] = {
 };
 
 void isa_reg_display() {
+  int i;
+  // 循环打印 x0 到 x31 通用寄存器
+  for (i = 0; i < 32; i++) {
+    printf("%-4s: 0x%-10x %-10d\n", regs[i], cpu.gpr[i], cpu.gpr[i]);
+  }
+  // 单独打印程序计数器 pc
+  printf("pc  : 0x%-10x %-10d\n", cpu.pc, cpu.pc);
 }
 
 word_t isa_reg_str2val(const char *s, bool *success) {

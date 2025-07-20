@@ -18,6 +18,7 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "sdb.h"
+#include <memory/paddr.h>
 
 static int is_batch_mode = false;
 
@@ -49,10 +50,17 @@ static int cmd_c(char *args) {
 
 
 static int cmd_q(char *args) {
+  nemu_state.state = NEMU_QUIT;
   return -1;
 }
 
 static int cmd_help(char *args);
+
+static int cmd_si(char *args);
+
+static int cmd_info(char *args);
+
+static int cmd_x(char *args);
 
 static struct {
   const char *name;
@@ -62,7 +70,9 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "q", "Exit NEMU", cmd_q },
-
+  { "si", "si [N] - Step N instructions (default 1)", cmd_si },
+  { "info", "info [r|w] - Print program state (r: registers, w: watchpoints)", cmd_info },
+  { "x", "x N EXPR - Scan N 4-byte words from memory address EXPR", cmd_x },
   /* TODO: Add more commands */
 
 };
@@ -92,6 +102,82 @@ static int cmd_help(char *args) {
   return 0;
 }
 
+static int cmd_si(char *args) {
+  uint64_t n = 1; // 当没有给出参数时，缺省为 1
+
+  // args 是 sdb_mainloop 传递过来的参数字符串
+  // 如果命令是 "si", args 为 NULL
+  // 如果命令是 "si 10", args 指向字符串 "10"
+  if (args != NULL) {
+    // 使用 C 标准库函数 atoi() 将参数字符串转换为整数
+    n = atoi(args);
+  }
+
+  // 一个小健壮性处理：如果用户输入 "si 0" 或 "si abc"，
+  // atoi 会返回 0，此时我们不执行任何指令。
+  if (n == 0 && args != NULL) {
+      printf("Si n, where n is an integer greater than or equal to 1\n");
+      // 保持沉默或给个提示
+      return 0;
+  }
+
+  cpu_exec(n);
+
+  return 0;
+}
+
+// 和其他 cmd_* 函数放在一起
+static int cmd_info(char *args) {
+  if (args == NULL) {
+    printf("Argument required. Usage: info [r|w]\n");
+    return 0;
+  }
+
+  if (strcmp(args, "r") == 0) {
+    // 调用我们刚刚为 riscv32 实现的函数
+    isa_reg_display();
+  }
+  else if (strcmp(args, "w") == 0) {
+    printf("Watchpoint status is not implemented yet.\n");
+  }
+  else {
+    printf("Unknown subcommand '%s' for 'info'. Use 'r' for registers or 'w' for watchpoints.\n", args);
+  }
+
+  return 0;
+}
+
+static int cmd_x(char *args) {
+  char *arg_n = strtok(args, " ");
+  char *arg_expr = strtok(NULL, " ");
+
+  if (arg_n == NULL || arg_expr == NULL) {
+    printf("Usage: x N EXPR (e.g., x 10 0x80000000)\n");
+    return 0;
+  }
+
+  // 1. 解析参数 N
+  int n = atoi(arg_n);
+
+  // 2. 解析表达式 EXPR (十六进制数)
+  // 使用 strtol 函数，它可以将字符串以指定进制转换为长整型
+  // 第三个参数 16 表示按十六进制解析
+  paddr_t start_addr = strtol(arg_expr, NULL, 16);
+
+  // 3. 循环扫描并打印内存
+  int i;
+  for (i = 0; i < n; i++) {
+    paddr_t current_addr = start_addr + i * 4;
+    word_t data = paddr_read(current_addr, 4);
+
+    // 打印地址和数据
+    // 0x%08x: 打印8位十六进制数，不足8位前面补0
+    // 0x%08x: 同样格式打印读取到的4字节数据
+    printf("0x%08x: 0x%08x\n", current_addr, data);
+  }
+
+  return 0;
+}
 void sdb_set_batch_mode() {
   is_batch_mode = true;
 }

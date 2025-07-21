@@ -21,30 +21,32 @@
 #include <regex.h>
 
 enum {
-  TK_NOTYPE = 256, TK_EQ,
-
-  /* TODO: Add more token types */
-
+  TK_NOTYPE = 256, TK_EQ, TK_NUM, TK_HEXNUM, TK_REG,
 };
 
 static struct rule {
   const char *regex;
   int token_type;
 } rules[] = {
-
-  /* TODO: Add more rules.
-   * Pay attention to the precedence level of different rules.
-   */
-
   {" +", TK_NOTYPE},    // spaces
   {"\\+", '+'},         // plus
   {"==", TK_EQ},        // equal
+  {"-", '-'},                // minus
+  {"\\*", '*'},              // multiply
+  {"/", '/'},                // divide
+  {"\\(", '('},              // left parenthesis
+  {"\\)", ')'},              // right parenthesis
+  {"0x[0-9a-fA-F]+", TK_HEXNUM}, // hex number
+  {"[0-9]+", TK_NUM},         // decimal number
+  {"\\$[a-z]{2,3}", TK_REG},  // register name (e.g., $eax, $pc)
 };
 
 #define NR_REGEX ARRLEN(rules)
 
 static regex_t re[NR_REGEX] = {};
 
+bool check_parentheses(int p, int q);
+int find_main_op(int p, int q);
 /* Rules are used for many times.
  * Therefore we compile them only once before any usage.
  */
@@ -67,7 +69,7 @@ typedef struct token {
   char str[32];
 } Token;
 
-static Token tokens[32] __attribute__((used)) = {};
+static Token tokens[1024] __attribute__((used)) = {};
 static int nr_token __attribute__((used))  = 0;
 
 static bool make_token(char *e) {
@@ -83,21 +85,25 @@ static bool make_token(char *e) {
       if (regexec(&re[i], e + position, 1, &pmatch, 0) == 0 && pmatch.rm_so == 0) {
         char *substr_start = e + position;
         int substr_len = pmatch.rm_eo;
-
         Log("match rules[%d] = \"%s\" at position %d with len %d: %.*s",
             i, rules[i].regex, position, substr_len, substr_len, substr_start);
-
         position += substr_len;
-
         /* TODO: Now a new token is recognized with rules[i]. Add codes
          * to record the token in the array `tokens'. For certain types
          * of tokens, some extra actions should be performed.
          */
-
         switch (rules[i].token_type) {
-          default: TODO();
+          case TK_NOTYPE: break; // Ignore spaces
+          default:
+            if (nr_token >= 1024) {
+              printf("Expression too long\n");
+              return false;
+            }
+            tokens[nr_token].type = rules[i].token_type;
+            strncpy(tokens[nr_token].str, substr_start, substr_len);
+            tokens[nr_token].str[substr_len] = '\0';
+            nr_token++;
         }
-
         break;
       }
     }
@@ -112,6 +118,63 @@ static bool make_token(char *e) {
 }
 
 
+static word_t eval(int p, int q, bool *success) {
+  if (p > q) {
+    /* Bad expression */
+    *success = false;
+    return 0;
+  }
+  else if (p == q) {
+    /* Single token.
+     * For now this token should be a number.
+     * Return the value of the number.
+     */
+    word_t val = 0;
+    switch(tokens[p].type) {
+        case TK_NUM:
+            sscanf(tokens[p].str, "%u", &val);
+            return val;
+        case TK_HEXNUM:
+            sscanf(tokens[p].str, "%x", &val);
+            return val;
+        case TK_REG:
+            // 使用框架中的 isa_reg_str2val 函数将寄存器名转换为值
+            return isa_reg_str2val(tokens[p].str + 1, success); // +1 to skip '$'
+        default:
+            *success = false;
+            return 0;
+    }
+  }
+  else if (check_parentheses(p, q) == true) {
+    /* The expression is surrounded by a matched pair of parentheses.
+     * If so, call eval() recursively to evaluate the sub-expression
+     * inside the parentheses.
+     */
+    return eval(p + 1, q - 1, success);
+  }
+  else {
+    int op = find_main_op(p, q); // 寻找主操作符
+    word_t val1 = eval(p, op - 1, success);
+    word_t val2 = eval(op + 1, q, success);
+
+    switch (tokens[op].type) {
+      case '+': return val1 + val2;
+      case '-': return val1 - val2;
+      case '*': return val1 * val2;
+      case '/': 
+        if (val2 == 0) {
+            printf("Error: Division by zero\n");
+            *success = false;
+            return 0;
+        }
+        return val1 / val2;
+      case TK_EQ: return val1 == val2;
+      default: assert(0);
+    }
+  }
+}
+
+// 主入口函数
 word_t expr(char *e, bool *success) {
   if (!make_token(e)) {
     *success = false;
@@ -119,7 +182,47 @@ word_t expr(char *e, bool *success) {
   }
 
   /* TODO: Insert codes to evaluate the expression. */
-  TODO();
+  *success = true;
+  return eval(0, nr_token - 1, success);
+}
 
-  return 0;
+// 以下是 eval 需要的辅助函数，也放在 expr.c 中
+
+bool check_parentheses(int p, int q) {
+  if (tokens[p].type != '(' || tokens[q].type != ')') {
+    return false;
+  }
+  int balance = 0;
+  for (int i = p + 1; i < q; i++) {
+    if (tokens[i].type == '(') balance++;
+    if (tokens[i].type == ')') balance--;
+    if (balance < 0) return false;
+  }
+  return balance == 0;
+}
+
+int find_main_op(int p, int q) {
+    int op = -1;
+    int balance = 0;
+    int precedence = 10; // Lowest precedence
+
+    for (int i = q; i >= p; i--) {
+        if (tokens[i].type == ')') { balance++; continue; }
+        if (tokens[i].type == '(') { balance--; continue; }
+        if (balance != 0) continue;
+
+        int current_precedence = 0;
+        switch (tokens[i].type) {
+            case TK_EQ: current_precedence = 1; break;
+            case '+': case '-': current_precedence = 2; break;
+            case '*': case '/': current_precedence = 3; break;
+            default: continue;
+        }
+
+        if (current_precedence <= precedence) {
+            precedence = current_precedence;
+            op = i;
+        }
+    }
+    return op;
 }

@@ -62,6 +62,11 @@ static int cmd_info(char *args);
 
 static int cmd_x(char *args);
 
+static int cmd_p(char *args);
+
+static int cmd_test(char *args);
+
+
 static struct {
   const char *name;
   const char *description;
@@ -73,6 +78,8 @@ static struct {
   { "si", "si [N] - Step N instructions (default 1)", cmd_si },
   { "info", "info [r|w] - Print program state (r: registers, w: watchpoints)", cmd_info },
   { "x", "x N EXPR - Scan N 4-byte words from memory address EXPR", cmd_x },
+  { "p", "p EXPR - Evaluate expression EXPR", cmd_p },
+  { "test", "test FILE - Automated test for expression evaluation from a file", cmd_test },
   /* TODO: Add more commands */
 
 };
@@ -178,6 +185,78 @@ static int cmd_x(char *args) {
 
   return 0;
 }
+
+// 声明我们将要使用的表达式求值函数
+word_t expr(char *e, bool *success);
+
+// 实现 test 命令的处理函数
+static int cmd_test(char *args) {
+    if (args == NULL) {
+        printf("Usage: test FILE_PATH\n");
+        return 0;
+    }
+
+    FILE *fp = fopen(args, "r");
+    if (fp == NULL) {
+        printf("Cannot open file '%s'\n", args);
+        return 0;
+    }
+
+    printf("Starting automated test from file '%s'...\n", args);
+    int line_num = 0;
+    char line[65536];
+    bool all_passed = true;
+
+    // 逐行读取文件
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        line_num++;
+        // 去掉行尾的换行符
+        line[strcspn(line, "\n")] = 0;
+
+        // 1. 解析出文件中的正确结果和表达式
+        uint32_t correct_result;
+        char expression_str[65536];
+        sscanf(line, "%u %[^\n]", &correct_result, expression_str);
+
+        // 2. 使用我们自己实现的 expr() 函数计算
+        bool success = true;
+        uint32_t my_result = expr(expression_str, &success);
+        
+        // 3. 对比结果
+        if (!success || my_result != correct_result) {
+            printf("Validation Failed at line %d!\n", line_num);
+            printf("Expression: %s\n", expression_str);
+            printf("Expected Result: %u\n", correct_result);
+            printf("Your Result: %u\n", my_result);
+            all_passed = false;
+            break; // 遇到第一个错误就停止
+        }
+    }
+
+    fclose(fp);
+
+    if (all_passed) {
+        printf("Congratulations! All %d tests from file '%s' passed!\n", line_num, args);
+    }
+    return 0;
+}
+
+
+static int cmd_p(char *args) {
+  if (args == NULL) {
+    printf("Usage: p EXPR\n");
+    return 0;
+  }
+  bool success = true;
+  word_t result = expr(args, &success);
+  if (success) {
+    printf("Expression value: %u (0x%x)\n", result, result);
+  } else {
+    printf("Invalid expression\n");
+  }
+  return 0;
+}
+
 void sdb_set_batch_mode() {
   is_batch_mode = true;
 }

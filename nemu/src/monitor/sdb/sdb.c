@@ -66,6 +66,18 @@ static int cmd_p(char *args);
 
 static int cmd_test(char *args);
 
+static int cmd_w(char *args);
+
+static int cmd_d(char *args);
+
+word_t expr(char *e, bool *success);
+
+WP* new_wp();
+
+void free_wp(int no);
+
+void display_watchpoints();
+
 
 static struct {
   const char *name;
@@ -80,6 +92,8 @@ static struct {
   { "x", "x N EXPR - Scan N 4-byte words from memory address EXPR", cmd_x },
   { "p", "p EXPR - Evaluate expression EXPR", cmd_p },
   { "test", "test FILE - Automated test for expression evaluation from a file", cmd_test },
+  { "w", "w EXPR - Set a watchpoint on an expression", cmd_w },
+  { "d", "d N - Delete watchpoint N", cmd_d },
   /* TODO: Add more commands */
 
 };
@@ -145,7 +159,7 @@ static int cmd_info(char *args) {
     isa_reg_display();
   }
   else if (strcmp(args, "w") == 0) {
-    printf("Watchpoint status is not implemented yet.\n");
+    display_watchpoints();
   }
   else {
     printf("Unknown subcommand '%s' for 'info'. Use 'r' for registers or 'w' for watchpoints.\n", args);
@@ -155,39 +169,53 @@ static int cmd_info(char *args) {
 }
 
 static int cmd_x(char *args) {
+  // 1. 解析第一个参数 N (要扫描的数量)
   char *arg_n = strtok(args, " ");
-  char *arg_expr = strtok(NULL, " ");
-
-  if (arg_n == NULL || arg_expr == NULL) {
-    printf("Usage: x N EXPR (e.g., x 10 0x80000000)\n");
+  if (arg_n == NULL) {
+    printf("Usage: x N EXPR\n");
+    return 0;
+  }
+  int n = atoi(arg_n);
+  if (n <= 0) {
+    printf("Error: N must be a positive integer.\n");
     return 0;
   }
 
-  // 1. 解析参数 N
-  int n = atoi(arg_n);
+  // 2. 获取表达式 EXPR 的字符串
+  // args 字符串在被 strtok 处理后，"N" 和 EXPR 之间被 '\0' 分隔。
+  // arg_expr 指向 N 后面的第一个字符，也就是表达式的开头。
+  char *arg_expr = arg_n + strlen(arg_n) + 1;
+  if (*arg_expr == '\0') {
+      printf("Usage: x N EXPR\n");
+      return 0;
+  }
 
-  // 2. 解析表达式 EXPR (十六进制数)
-  // 使用 strtol 函数，它可以将字符串以指定进制转换为长整型
-  // 第三个参数 16 表示按十六进制解析
-  paddr_t start_addr = strtol(arg_expr, NULL, 16);
+  // 3. 调用 expr() 函数来计算表达式的值，得到起始地址
+  bool success = true;
+  paddr_t start_addr = expr(arg_expr, &success);
 
-  // 3. 循环扫描并打印内存
+  // 检查表达式求值是否成功
+  if (!success) {
+    printf("Invalid expression for start address.\n");
+    return 0;
+  }
+
+  // 4. 循环扫描并打印内存 (这部分逻辑保持不变)
+  printf("Scanning memory from address 0x%08x:\n", start_addr);
   int i;
   for (i = 0; i < n; i++) {
     paddr_t current_addr = start_addr + i * 4;
+    // 使用 paddr_read 读取4个字节的数据
     word_t data = paddr_read(current_addr, 4);
 
     // 打印地址和数据
-    // 0x%08x: 打印8位十六进制数，不足8位前面补0
-    // 0x%08x: 同样格式打印读取到的4字节数据
     printf("0x%08x: 0x%08x\n", current_addr, data);
   }
 
   return 0;
 }
-
 // 声明我们将要使用的表达式求值函数
-word_t expr(char *e, bool *success);
+
 
 // 实现 test 命令的处理函数
 static int cmd_test(char *args) {
@@ -298,6 +326,49 @@ void sdb_mainloop() {
     if (i == NR_CMD) { printf("Unknown command '%s'\n", cmd); }
   }
 }
+
+static int cmd_w(char *args) {
+  if (args == NULL) {
+    printf("Usage: w EXPR\n");
+    return 0;
+  }
+
+  WP *wp = new_wp();
+  if (wp == NULL) {
+    return 0; // new_wp 内部会打印错误信息
+  }
+
+  // 记录表达式
+  strncpy(wp->expr_str, args, sizeof(wp->expr_str) - 1);
+  wp->expr_str[sizeof(wp->expr_str) - 1] = '\0';
+
+  // 计算初始值
+  bool success = true;
+  wp->old_val = expr(args, &success);
+
+  if (!success) {
+    printf("Invalid expression. Watchpoint creation failed.\n");
+    free_wp(wp->NO); // 归还刚刚申请的节点
+    return 0;
+  }
+
+  printf("Watchpoint %d: %s\n", wp->NO, wp->expr_str);
+  return 0;
+}
+
+// d 命令: 删除监视点
+static int cmd_d(char *args) {
+  if (args == NULL) {
+    printf("Usage: d N\n");
+    return 0;
+  }
+  int no = atoi(args);
+  free_wp(no);
+  return 0;
+}
+
+
+
 
 void init_sdb() {
   /* Compile the regular expressions. */

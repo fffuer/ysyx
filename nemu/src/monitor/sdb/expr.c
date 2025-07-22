@@ -19,9 +19,12 @@
  * Type 'man regex' for more information about POSIX regex functions.
  */
 #include <regex.h>
-
+#include <stdbool.h>
+#include <memory/paddr.h>
 enum {
-  TK_NOTYPE = 256, TK_EQ, TK_NUM, TK_HEXNUM, TK_REG,
+  TK_NOTYPE = 256, TK_EQ, TK_NUM, TK_HEXNUM, TK_REG,TK_NEQ,   // Not Equal
+  TK_LAND,  // Logical AND
+  TK_DEREF, //
 };
 
 static struct rule {
@@ -35,7 +38,9 @@ static struct rule {
   {"\\*", '*'},              // multiply
   {"/", '/'},                // divide
   {"\\(", '('},              // left parenthesis
-  {"\\)", ')'},              // right parenthesis
+  {"\\)", ')'},
+  {"!=", TK_NEQ},
+  {"&&", TK_LAND},            // right parenthesis
   {"0x[0-9a-fA-F]+", TK_HEXNUM}, // hex number
   {"[0-9]+", TK_NUM},         // decimal number
   {"\\$[a-z]{2,3}", TK_REG},  // register name (e.g., $eax, $pc)
@@ -93,9 +98,32 @@ static bool make_token(char *e) {
          * of tokens, some extra actions should be performed.
          */
         switch (rules[i].token_type) {
-          case TK_NOTYPE: break; // Ignore spaces
+          case TK_NOTYPE: break; // 忽略空格
+
+          case '*': { // 当匹配到 * 时，需要特殊处理
+            bool is_deref = false;
+            // 如果是第一个token，或者前一个token是操作符或左括号，则为解引用
+            if (nr_token == 0) {
+              is_deref = true;
+            } else {
+              int prev_type = tokens[nr_token - 1].type;
+              if (prev_type != TK_NUM && prev_type != TK_HEXNUM &&
+                  prev_type != TK_REG && prev_type != ')') {
+                is_deref = true;
+              }
+            }
+          
+            if (is_deref) {
+              tokens[nr_token].type = TK_DEREF;
+            } else {
+              tokens[nr_token].type = '*';
+            }
+            nr_token++;
+            break;
+          }
+        
           default:
-            if (nr_token >= 1024) {
+            if (nr_token >= 1024) { // 使用您之前定义的MAX_TOKENS
               printf("Expression too long\n");
               return false;
             }
@@ -118,44 +146,104 @@ static bool make_token(char *e) {
 }
 
 
+// static word_t eval(int p, int q, bool *success) {
+//   if (p > q) {
+//     /* Bad expression */
+//     *success = false;
+//     return 0;
+//   }
+//   else if (p == q) {
+//     /* Single token.
+//      * For now this token should be a number.
+//      * Return the value of the number.
+//      */
+//     word_t val = 0;
+//     switch(tokens[p].type) {
+//         case TK_NUM:
+//             sscanf(tokens[p].str, "%u", &val);
+//             return val;
+//         case TK_HEXNUM:
+//             sscanf(tokens[p].str, "%x", &val);
+//             return val;
+//         case TK_REG:
+//             // 使用框架中的 isa_reg_str2val 函数将寄存器名转换为值
+//             return isa_reg_str2val(tokens[p].str + 1, success); // +1 to skip '$'
+//         default:
+//             *success = false;
+//             return 0;
+//     }
+//   }
+//   else if (check_parentheses(p, q) == true) {
+//     /* The expression is surrounded by a matched pair of parentheses.
+//      * If so, call eval() recursively to evaluate the sub-expression
+//      * inside the parentheses.
+//      */
+//     return eval(p + 1, q - 1, success);
+//   }
+//   else {
+//     int op = find_main_op(p, q); // 寻找主操作符
+//     word_t val1 = eval(p, op - 1, success);
+//     word_t val2 = eval(op + 1, q, success);
+
+//     switch (tokens[op].type) {
+//       case '+': return val1 + val2;
+//       case '-': return val1 - val2;
+//       case '*': return val1 * val2;
+//       case '/': 
+//         if (val2 == 0) {
+//             printf("Error: Division by zero\n");
+//             *success = false;
+//             return 0;
+//         }
+//         return val1 / val2;
+//       case TK_EQ: return val1 == val2;
+//       default: assert(0);
+//     }
+//   }
+// }
+// 在 src/monitor/sdb/expr.c
 static word_t eval(int p, int q, bool *success) {
   if (p > q) {
-    /* Bad expression */
     *success = false;
     return 0;
   }
-  else if (p == q) {
-    /* Single token.
-     * For now this token should be a number.
-     * Return the value of the number.
-     */
+  else if (p == q) { 
     word_t val = 0;
-    switch(tokens[p].type) {
-        case TK_NUM:
-            sscanf(tokens[p].str, "%u", &val);
-            return val;
-        case TK_HEXNUM:
-            sscanf(tokens[p].str, "%x", &val);
-            return val;
-        case TK_REG:
-            // 使用框架中的 isa_reg_str2val 函数将寄存器名转换为值
-            return isa_reg_str2val(tokens[p].str + 1, success); // +1 to skip '$'
-        default:
-            *success = false;
-            return 0;
-    }
+      switch(tokens[p].type) {
+          case TK_NUM:
+              sscanf(tokens[p].str, "%u", &val);
+              return val;
+          case TK_HEXNUM:
+              sscanf(tokens[p].str, "%x", &val);
+              return val;
+          case TK_REG:
+             // 使用框架中的 isa_reg_str2val 函数将寄存器名转换为值
+             return isa_reg_str2val(tokens[p].str + 1, success); // +1 to skip '$'
+          default:
+             *success = false;
+              return 0;
+      }
   }
   else if (check_parentheses(p, q) == true) {
-    /* The expression is surrounded by a matched pair of parentheses.
-     * If so, call eval() recursively to evaluate the sub-expression
-     * inside the parentheses.
-     */
     return eval(p + 1, q - 1, success);
   }
   else {
-    int op = find_main_op(p, q); // 寻找主操作符
+    int op = find_main_op(p, q);
+    
+    // --- 处理一元运算符（解引用） ---
+    if (op == p && tokens[op].type == TK_DEREF) {
+      // 递归计算*后面的表达式，得到地址
+      word_t address = eval(p + 1, q, success);
+      if (!*success) return 0;
+      // 从该地址读取4字节数据
+      return paddr_read(address, 4);
+    }
+    
+    // --- 处理二元运算符 ---
     word_t val1 = eval(p, op - 1, success);
     word_t val2 = eval(op + 1, q, success);
+
+    if(!*success) return 0; // 如果子表达式求值失败，立即返回
 
     switch (tokens[op].type) {
       case '+': return val1 + val2;
@@ -169,6 +257,11 @@ static word_t eval(int p, int q, bool *success) {
         }
         return val1 / val2;
       case TK_EQ: return val1 == val2;
+
+      /* 新增的求值逻辑 */
+      case TK_NEQ: return val1 != val2;
+      case TK_LAND: return val1 && val2;
+
       default: assert(0);
     }
   }
@@ -204,21 +297,25 @@ bool check_parentheses(int p, int q) {
 int find_main_op(int p, int q) {
     int op = -1;
     int balance = 0;
-    int precedence = 10; // Lowest precedence
+    int precedence = 10; // 一个比所有操作符优先级都低的初始值
 
     for (int i = q; i >= p; i--) {
         if (tokens[i].type == ')') { balance++; continue; }
         if (tokens[i].type == '(') { balance--; continue; }
-        if (balance != 0) continue;
+        if (balance != 0) continue; // 忽略括号内的操作符
 
         int current_precedence = 0;
         switch (tokens[i].type) {
-            case TK_EQ: current_precedence = 1; break;
-            case '+': case '-': current_precedence = 2; break;
-            case '*': case '/': current_precedence = 3; break;
+            // 定义优先级
+            case TK_LAND: current_precedence = 1; break;
+            case TK_EQ: case TK_NEQ: current_precedence = 2; break;
+            case '+': case '-': current_precedence = 3; break;
+            case '*': case '/': current_precedence = 4; break;
+            case TK_DEREF: current_precedence = 5; break; // 最高优先级
             default: continue;
         }
 
+        // 寻找优先级最低的操作符
         if (current_precedence <= precedence) {
             precedence = current_precedence;
             op = i;

@@ -21,3 +21,20 @@
 word_t expr(char *e, bool *success);
 
 #endif
+// in src/monitor/sdb/sdb.h
+
+typedef struct watchpoint {
+  int NO;
+  struct watchpoint *next;
+
+  // 新增成员
+  char expr_str[256]; // 监视的表达式字符串
+  uint32_t old_val;   // 表达式的上一次求值结果
+} WP;
+
+// 声明管理函数
+void init_wp_pool();
+WP* new_wp();
+void free_wp(int no);
+void display_watchpoints();
+bool check_watchpoints();

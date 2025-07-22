@@ -33,6 +33,33 @@ void isa_reg_display() {
   printf("pc  : 0x%-10x %-10d\n", cpu.pc, cpu.pc);
 }
 
+#include <isa.h>
+#include "local-include/reg.h" // 确保包含了 reg.h，其中有 regs[] 数组的声明
+
+// regs[] 数组应该已经在这个文件或者它包含的头文件里定义好了
+// static const char *regs[] = { ... };
+
 word_t isa_reg_str2val(const char *s, bool *success) {
-  return 0;
+  // 默认设置为成功
+  *success = true;
+
+  // 1. 首先，单独检查是否是程序计数器 "pc"
+  if (strcmp(s, "pc") == 0) {
+    return cpu.pc;
+  }
+
+  // 2. 如果不是 "pc"，则遍历通用寄存器名称数组
+  int i;
+  for (i = 0; i < 32; i++) {
+    // 使用 strcmp 比较传入的字符串和寄存器名称
+    if (strcmp(s, regs[i]) == 0) {
+      // 找到匹配项，返回 gpr 数组中对应下标的值
+      return cpu.gpr[i];
+    }
+  }
+
+  // 3. 如果循环结束还没有找到匹配项，说明寄存器名无效
+  *success = false;
+  printf("Error: Unknown register name '%s'\n", s);
+  return 0; // 返回一个无意义的值
 }

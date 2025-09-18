@@ -23,7 +23,7 @@
 #define Mw vaddr_write
 
 enum {
-  TYPE_I, TYPE_U, TYPE_S,TYPE_J,
+  TYPE_I, TYPE_U, TYPE_S,TYPE_J,TYPE_B,TYPE_R,
   TYPE_N, // none
 };
 
@@ -32,6 +32,7 @@ enum {
 #define immI() do { *imm = SEXT(BITS(i, 31, 20), 12); } while(0)
 #define immU() do { *imm = SEXT(BITS(i, 31, 12), 20) << 12; } while(0)
 #define immS() do { *imm = (SEXT(BITS(i, 31, 25), 7) << 5) | BITS(i, 11, 7); } while(0)
+#define immB() do { *imm = SEXT(((BITS(i, 31, 31) << 12) | (BITS(i, 7, 7) << 11) | (BITS(i, 30, 25) << 5) | (BITS(i, 11, 8) << 1)), 13); } while(0)
 #define immJ() do { *imm = SEXT(((BITS(i, 31, 31) << 20) | (BITS(i, 19, 12) << 12) | (BITS(i, 20, 20) << 11) | (BITS(i, 30, 21) << 1)), 21); } while(0)
 static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_t *imm, int type) {
   uint32_t i = s->isa.inst;
@@ -44,6 +45,8 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2, word_
     case TYPE_S: src1R(); src2R(); immS(); break;
     case TYPE_N: break;
     case TYPE_J:                   immJ(); break;
+    case TYPE_R: src1R(); src2R();         break;
+    case TYPE_B: src1R(); src2R(); immB(); break;
     default: panic("unsupported type = %d", type);
   }
 }
@@ -65,7 +68,7 @@ static int decode_exec(Decode *s) {
   INSTPAT("??????? ????? ????? 000 ????? 01000 11", sb     , S, Mw(src1 + imm, 1, src2));
   INSTPAT("??????? ????? ????? 000 ????? 00100 11", addi   , I, R(rd) = src1 + imm);
   
-  // jal (Jump and Link) - J-Type
+  //// jal (Jump and Link) - J-Type
   INSTPAT("????? ????? ????? ??? ????? 1101111", jal, J, {
   // 1. Link: 如果目标寄存器 rd 不是 x0, 就保存返回地址 (pc + 4)
   if (rd != 0) {
@@ -74,10 +77,10 @@ static int decode_exec(Decode *s) {
   // 2. Jump: 设置下一条指令的PC为当前PC + 立即数
   s->dnpc = s->pc + imm;
   });
-
-INSTPAT("????? ????? ????? 000 ????? 1100111", jalr, I, {
-  // 暂存一下pc + 4, 作为可能的返回地址
-  word_t link_addr = s->pc + 4;
+  //// jalr (Jump and Link Register) - I-Type
+  INSTPAT("????? ????? ????? 000 ????? 1100111", jalr, I, {
+    // 暂存一下pc + 4, 作为可能的返回地址
+    word_t link_addr = s->pc + 4;
 
   // 直接使用 src1 (代表rs1寄存器的值) 和 imm (代表立即数的值)
   // 计算跳转目标地址，并确保最低位为0
@@ -89,9 +92,56 @@ INSTPAT("????? ????? ????? 000 ????? 1100111", jalr, I, {
     // 这与您之前成功的修复风格一致
     cpu.gpr[rd] = link_addr;
   }
-});
-  // sw (Store Word) - S-Type
+  });
+  //// sw (Store Word) - S-Type
   INSTPAT("??????? ????? ????? 010 ????? 0100011", sw, S, Mw(src1 + imm, 4, src2));
+  //// lw (Load Word) - I-Type
+  INSTPAT("????? ????? ????? 010 ????? 0000011", lw, I, {
+    // 使用 Mr 宏从 (rs1的值 + imm的值) 地址读取4个字节
+    cpu.gpr[rd] = Mr(src1 + imm, 4);
+  });
+  //// add (Add) - R-Type
+  INSTPAT("0000000 ????? ????? 000 ????? 0110011", add, R, {
+    cpu.gpr[rd] = src1 + src2; // 直接使用 src1 和 src2 的值
+  });
+  //// sltu (Set if Less Than Unsigned) - R-Type
+  INSTPAT("0000000 ????? ????? 011 ????? 0110011", sltu, R, {
+    // src1 和 src2 都是 word_t (无符号),可以直接比较
+    cpu.gpr[rd] = (src1 < src2) ? 1 : 0;
+  });
+
+  //// xor (Exclusive Or) - R-Type
+  INSTPAT("0000000 ????? ????? 100 ????? 0110011", xor, R, {
+    cpu.gpr[rd] = src1 ^ src2;
+  });
+
+  //// or (Or) - R-Type
+  INSTPAT("0000000 ????? ????? 110 ????? 0110011", or, R, {
+    cpu.gpr[rd] = src1 | src2;
+  });
+
+  // [ I-Type Arithmetic/Logic ]
+  //// sltiu (Set if Less Than Immediate Unsigned) - I-Type
+  // 用于实现 seqz 伪指令
+  INSTPAT("????? ????? ????? 011 ????? 0010011", sltiu, I, {
+    cpu.gpr[rd] = (src1 < imm) ? 1 : 0;
+  });
+
+  // [ Branch ]
+  //// beq (Branch if Equal) - B-Type
+  // 用于实现 beqz 伪指令
+  INSTPAT("????? ????? ????? 000 ????? 1100011", beq, B, {
+    if (src1 == src2) {
+      s->dnpc = s->pc + imm;
+    }
+  });
+
+  //// bne (Branch if Not Equal) - B-Type
+  INSTPAT("????? ????? ????? 001 ????? 1100011", bne, B, {
+    if (src1 != src2) {
+      s->dnpc = s->pc + imm;
+    }
+  });
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak , N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv    , N, INV(s->pc));
 

@@ -41,9 +41,9 @@ static struct rule {
   {"\\)", ')'},
   {"!=", TK_NEQ},
   {"&&", TK_LAND},            // right parenthesis
+  {"\\$[a-zA-Z0-9]+", TK_REG},
   {"0x[0-9a-fA-F]+", TK_HEXNUM}, // hex number
   {"[0-9]+", TK_NUM},         // decimal number
-  {"\\$[a-z]{2,3}", TK_REG},  // register name (e.g., $eax, $pc)
 };
 
 #define NR_REGEX ARRLEN(rules)

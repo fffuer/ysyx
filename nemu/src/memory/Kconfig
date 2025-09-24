@@ -30,5 +30,4 @@ config MEM_RANDOM
   default y
   help
     This may help to find undefined behaviors.
-
 endmenu #MEMORY

@@ -12,18 +12,74 @@
 *
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
-
+#include <ftrace.h>
 #include <cpu/cpu.h>
 #include <cpu/decode.h>
 #include <cpu/difftest.h>
 #include <locale.h>
 #include "../monitor/sdb/sdb.h"
+#include <memory/paddr.h>
 /* The assembly code of instructions executed is only output to the screen
  * when the number of instructions executed is less than this value.
  * This is useful when you use the `si' command.
  * You can modify this value as you want.
  */
 #define MAX_INST_TO_PRINT 10
+// 定义环形缓冲区的大小
+#define IRINGBUF_SIZE 16
+// 定义每条日志的最大长度
+#define LOG_ENTRY_SIZE 128
+
+// 环形缓冲区的数据结构 (声明为 static, 成为文件私有)
+static char iringbuf[IRINGBUF_SIZE][LOG_ENTRY_SIZE];
+static int p_head = 0;
+static bool is_full = false;
+
+// 将日志写入缓冲区的函数 (声明为 static)
+static void iringbuf_write(const char *log) {
+  // 使用 snprintf 安全地将日志内容写入环形缓冲区
+  // 它能防止溢出并保证字符串以'\0'结尾
+  snprintf(iringbuf[p_head], LOG_ENTRY_SIZE, "%s", log);
+
+  // 清理可能存在的换行符
+  char *p = strchr(iringbuf[p_head], '\n');
+  if (p) {
+    *p = '\0';
+  }
+
+  // 更新头指针
+  p_head = (p_head + 1) % IRINGBUF_SIZE;
+  if (p_head == 0) {
+    is_full = true;
+  }
+}
+
+
+// 打印缓冲区内容的函数 (声明为 static)
+static void iringbuf_display() {
+  printf("\nInstruction Ring Buffer (last %d instructions):\n", IRINGBUF_SIZE);
+  printf("--------------------------------------------------\n");
+
+  if (!is_full && p_head == 0) {
+    printf("(Buffer is empty)\n");
+    return;
+  }
+
+  int start_pos = is_full ? p_head : 0;
+  int count = is_full ? IRINGBUF_SIZE : p_head;
+
+  for (int i = 0; i < count; i++) {
+    int index = (start_pos + i) % IRINGBUF_SIZE;
+    if (index == (p_head - 1 + IRINGBUF_SIZE) % IRINGBUF_SIZE) {
+      // 用箭头指向最新执行的指令
+      printf("--> %s\n", iringbuf[index]);
+    } else {
+      printf("    %s\n", iringbuf[index]);
+    }
+  }
+  printf("--------------------------------------------------\n");
+}
+
 
 CPU_state cpu = {};
 uint64_t g_nr_guest_inst = 0;
@@ -34,8 +90,19 @@ void device_update();
 
 static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
 #ifdef CONFIG_ITRACE_COND
-  if (ITRACE_COND) { log_write("%s\n", _this->logbuf); }
+  if (ITRACE_COND) { log_write("%s\n", _this->logbuf); iringbuf_write(_this->logbuf);}
 #endif
+// --- FTRACE START: 仿照itrace的模式 ---
+#ifdef CONFIG_FTRACE
+  char ftrace_buf[128];
+  // a. 准备ftrace日志
+  uint32_t inst = paddr_read(_this->pc, 4);
+  if (ftrace_log(ftrace_buf, sizeof(ftrace_buf), _this->pc, dnpc, inst)) {
+    // b. 如果生成了日志, 直接打印到控制台
+    puts(ftrace_buf); 
+  }
+#endif
+// --- FTRACE END ---
   if (g_print_step) { IFDEF(CONFIG_ITRACE, puts(_this->logbuf)); }
   IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
   // 检查所有监视点
@@ -122,6 +189,7 @@ void cpu_exec(uint64_t n) {
     case NEMU_RUNNING: nemu_state.state = NEMU_STOP; break;
 
     case NEMU_END: case NEMU_ABORT:
+      iringbuf_display();
       Log("nemu: %s at pc = " FMT_WORD,
           (nemu_state.state == NEMU_ABORT ? ANSI_FMT("ABORT", ANSI_FG_RED) :
            (nemu_state.halt_ret == 0 ? ANSI_FMT("HIT GOOD TRAP", ANSI_FG_GREEN) :

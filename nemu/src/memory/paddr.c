@@ -51,6 +51,18 @@ void init_mem() {
 }
 
 word_t paddr_read(paddr_t addr, int len) {
+    // 如果CONFIG_MTRACE被定义, 则添加mtrace逻辑
+#ifdef CONFIG_MTRACE
+  // 默认条件为true, 如果定义了MTRACE_COND, 则使用它
+  bool condition = true;
+  #ifdef CONFIG_MTRACE_COND
+    condition = (CONFIG_MTRACE_COND);
+  #endif
+
+  if (condition) {
+    Log("mtrace: read at address 0x%08x, len = %d", addr, len);
+  }
+#endif
   if (likely(in_pmem(addr))) return pmem_read(addr, len);
   IFDEF(CONFIG_DEVICE, return mmio_read(addr, len));
   out_of_bound(addr);
@@ -58,6 +70,18 @@ word_t paddr_read(paddr_t addr, int len) {
 }
 
 void paddr_write(paddr_t addr, int len, word_t data) {
+    // --- MTRACE START ---
+#ifdef CONFIG_MTRACE
+  // 同样的条件判断
+  bool condition = true;
+  #ifdef CONFIG_MTRACE_COND
+    condition = (CONFIG_MTRACE_COND);
+  #endif
+
+  if (condition) {
+    Log("mtrace: write at address 0x%08x, len = %d, data = 0x%08x", addr, len, data);
+  }
+#endif
   if (likely(in_pmem(addr))) { pmem_write(addr, len, data); return; }
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);

@@ -15,7 +15,7 @@
 
 #include <isa.h>
 #include <memory/paddr.h>
-
+#include <elf.h>
 void init_rand();
 void init_log(const char *log_file);
 void init_mem();
@@ -40,7 +40,9 @@ static void welcome() {
 #include <getopt.h>
 
 void sdb_set_batch_mode();
-
+#ifdef CONFIG_FTRACE
+static char *elf_file = NULL;
+#endif
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
@@ -75,15 +77,25 @@ static int parse_args(int argc, char *argv[]) {
     {"diff"     , required_argument, NULL, 'd'},
     {"port"     , required_argument, NULL, 'p'},
     {"help"     , no_argument      , NULL, 'h'},
+    #ifdef CONFIG_FTRACE
+    {"elf"      , required_argument, NULL, 'e'},
+    #endif
     {0          , 0                , NULL,  0 },
   };
   int o;
-  while ( (o = getopt_long(argc, argv, "-bhl:d:p:", table, NULL)) != -1) {
+  #ifdef CONFIG_FTRACE
+    while ( (o = getopt_long(argc, argv, "-bhl:d:p:e:", table, NULL)) != -1) {
+  #else
+    while ( (o = getopt_long(argc, argv, "-bhl:d:p:", table, NULL)) != -1) {
+  #endif
     switch (o) {
       case 'b': sdb_set_batch_mode(); break;
       case 'p': sscanf(optarg, "%d", &difftest_port); break;
       case 'l': log_file = optarg; break;
       case 'd': diff_so_file = optarg; break;
+      #ifdef CONFIG_FTRACE
+      case 'e': elf_file = optarg; break; // <-- 新增 case
+      #endif
       case 1: img_file = optarg; return 0;
       default:
         printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
@@ -127,7 +139,12 @@ void init_monitor(int argc, char *argv[]) {
 
   /* Initialize the simple debugger. */
   init_sdb();
-
+  #ifdef CONFIG_FTRACE
+  // --- 新增 ftrace 初始化调用 ---
+  // 传入解析到的elf文件名
+  void init_ftrace(const char *elf_path);
+  init_ftrace(elf_file);
+  #endif
   IFDEF(CONFIG_ITRACE, init_disasm());
 
   /* Display welcome message. */

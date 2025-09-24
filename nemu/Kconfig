@@ -150,8 +150,31 @@ config ITRACE_COND
   depends on ITRACE
   string "Only trace instructions when the condition is true"
   default "true"
+config MTRACE
+  bool "Enable memory trace"
+  default n
+  help
+    Support memory tracing in NEMU.
+    This will print a log for every memory access, which may
+    slow down the simulation.
 
-
+config MTRACE_COND
+  depends on MTRACE
+  string "Conditional memory trace"
+  default ""
+  help
+    Trace memory access only when the condition is met.
+    The C expression will be evaluated statically.
+    For example, you can use "addr >= 0x80000000 && addr < 0x80001000"
+    to trace the access to the first 4KB of memory.
+    'addr' is the physical address being accessed.
+config FTRACE
+    bool "Enable function trace"
+    default n
+    help
+      Support function tracing using symbols from an ELF file.
+      When enabled, NEMU will accept an `--elf` command-line
+      argument to load the symbol table.
 config DIFFTEST
   depends on TARGET_NATIVE_ELF
   bool "Enable differential testing"

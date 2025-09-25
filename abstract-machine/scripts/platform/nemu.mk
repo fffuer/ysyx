@@ -12,7 +12,7 @@ CFLAGS    += -I$(AM_HOME)/am/src/platform/nemu/include
 LDSCRIPTS += $(AM_HOME)/scripts/linker.ld
 LDFLAGS   += --defsym=_pmem_start=0x80000000 --defsym=_entry_offset=0x0
 LDFLAGS   += --gc-sections -e _start
-NEMUFLAGS += -l $(shell dirname $(IMAGE).elf)/nemu-log.txt
+NEMUFLAGS += -b -l $(shell dirname $(IMAGE).elf)/nemu-log.txt
 NEMU_CONFIG = $(NEMU_HOME)/.config
 ifneq ($(shell grep -qs "CONFIG_FTRACE=y" $(NEMU_CONFIG) && echo y),)
   NEMUFLAGS += --elf $(IMAGE).elf
